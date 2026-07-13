@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.SpaceWise" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#FF6B4A</item>
+        <item name="android:navigationBarColor">#171513</item>
+        <item name="android:statusBarColor">#171513</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
