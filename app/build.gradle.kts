@@ -12,3 +12,8 @@ android {
     }
     buildTypes { release { isMinifyEnabled = false; proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro") } }
 }
+
+dependencies {
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.activity:activity:1.10.0")
+}
