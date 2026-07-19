@@ -266,12 +266,39 @@ public class MainActivity extends AppCompatActivity {
             DuplicateGroup group=duplicateGroups.get(gi);keepByGroup.put(gi,0);
             LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(14),dp(14),dp(14),dp(14));box.setBackground(round(CARD,16));
             box.addView(text((group.items.get(0).mime.startsWith("video")?"Duplicate video":"Duplicate photo")+" · "+group.items.size()+" copies",17,TEXT,true));
-            RadioGroup radios=new RadioGroup(this);radios.setOrientation(RadioGroup.VERTICAL);
+            LinearLayout choicesView=new LinearLayout(this);
+            choicesView.setOrientation(LinearLayout.VERTICAL);
+            List<RadioButton> choices=new ArrayList<>();
+            final boolean[] changing={false};
             for(int i=0;i<group.items.size();i++){
-                StorageItem item=group.items.get(i);RadioButton radio=new RadioButton(this);radio.setText((i==0?"Keep original: ":"Keep: ")+item.name+"\n"+item.path+" · "+format(item.size));radio.setTextColor(i==0?GREEN:TEXT);radio.setPadding(0,dp(8),0,dp(8));radio.setId(View.generateViewId());final int groupIndex=gi,itemIndex=i;radio.setOnCheckedChangeListener((b,checked)->{if(checked)keepByGroup.put(groupIndex,itemIndex);});radios.addView(radio);if(i==0)radio.setChecked(true);
-                radio.setOnLongClickListener(v->{preview(item);return true;});
+                StorageItem item=group.items.get(i);
+                LinearLayout choice=row();
+                choice.setPadding(0,dp(7),0,dp(7));
+                ImageView thumbnail=new ImageView(this);
+                thumbnail.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                thumbnail.setBackgroundColor(0xff55463e);
+                Glide.with(this).load(item.uri).override(160,160).centerCrop().diskCacheStrategy(DiskCacheStrategy.RESOURCE).placeholder(android.R.drawable.ic_menu_gallery).into(thumbnail);
+                choice.addView(thumbnail,new LinearLayout.LayoutParams(dp(64),dp(64)));
+                RadioButton radio=new RadioButton(this);
+                radio.setText((i==0?"Keep original: ":"Keep: ")+item.name+"\n"+item.path+" · "+format(item.size));
+                radio.setTextColor(i==0?GREEN:TEXT);
+                radio.setPadding(dp(9),0,0,0);
+                choices.add(radio);
+                choice.addView(radio,new LinearLayout.LayoutParams(0,-2,1));
+                final int groupIndex=gi,itemIndex=i;
+                radio.setOnCheckedChangeListener((button,checked)->{
+                    if(!checked||changing[0])return;
+                    changing[0]=true;
+                    for(RadioButton other:choices)if(other!=button)other.setChecked(false);
+                    keepByGroup.put(groupIndex,itemIndex);
+                    changing[0]=false;
+                });
+                choice.setOnClickListener(v->radio.setChecked(true));
+                thumbnail.setOnClickListener(v->preview(item));
+                choicesView.addView(choice);
+                if(i==0)radio.setChecked(true);
             }
-            box.addView(radios);box.addView(text("Tap one copy to keep. Long-press a copy to preview it.",12,MUTED,false));page.addView(box,margins(0,0,0,12));
+            box.addView(choicesView);box.addView(text("A real thumbnail is shown for every copy. Tap one copy to keep; tap its thumbnail for full preview.",12,MUTED,false));page.addView(box,margins(0,0,0,12));
         }
         Button delete=button("Keep selected originals and delete all extra copies");
         delete.setOnClickListener(v->deleteDuplicateExtras());page.addView(delete,margins(0,12,0,0));
