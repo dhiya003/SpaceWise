@@ -22,6 +22,7 @@ import android.provider.MediaStore;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.webkit.MimeTypeMap;
 import android.widget.Button;
 import android.widget.CheckBox;
@@ -41,6 +42,11 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+
+import com.bumptech.glide.Glide;
+import com.bumptech.glide.load.engine.DiskCacheStrategy;
 
 import java.io.File;
 import java.io.InputStream;
@@ -199,22 +205,26 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showItems(String title,List<StorageItem> source) {
-        basePage(); addBack(title, source.size()+" items · "+format(totalSize(source)));
-        List<StorageItem> sorted=new ArrayList<>(source); sorted.sort((a,b)->Long.compare(b.size,a.size));
-        if(sorted.isEmpty()){page.addView(text("No files found in this category.",16,MUTED,false),margins(0,30,0,0));return;}
-        for(StorageItem item:sorted) page.addView(fileRow(item),margins(0,0,0,10));
-    }
-
-    private View fileRow(StorageItem item) {
-        LinearLayout card=row(); card.setPadding(dp(10),dp(10),dp(12),dp(10)); card.setBackground(round(CARD,14));
-        ImageView thumb=new ImageView(this); thumb.setScaleType(ImageView.ScaleType.CENTER_CROP); thumb.setBackgroundColor(0xff55463e);
-        if(item.media) thumb.setImageURI(item.uri); else thumb.setImageResource(android.R.drawable.ic_menu_save);
-        card.addView(thumb,new LinearLayout.LayoutParams(dp(66),dp(66)));
-        LinearLayout copy=new LinearLayout(this);copy.setOrientation(LinearLayout.VERTICAL);copy.setPadding(dp(12),0,dp(6),0);
-        copy.addView(text(item.name,15,TEXT,true));copy.addView(text(format(item.size)+" · "+item.path,12,MUTED,false));
-        card.addView(copy,new LinearLayout.LayoutParams(0,-2,1));
-        Button open=smallButton("Preview"); open.setOnClickListener(v->preview(item)); card.addView(open);
-        return card;
+        LinearLayout root=new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(18),dp(18),dp(18),0);
+        root.setBackgroundColor(BG);
+        page=root;
+        addBack(title,source.size()+" items · "+format(totalSize(source)));
+        List<StorageItem> sorted=new ArrayList<>(source);
+        sorted.sort((a,b)->Long.compare(b.size,a.size));
+        if(sorted.isEmpty()){
+            page.addView(text("No files found in this category.",16,MUTED,false),margins(0,30,0,0));
+            setContentView(root);
+            return;
+        }
+        RecyclerView list=new RecyclerView(this);
+        list.setLayoutManager(new LinearLayoutManager(this));
+        list.setHasFixedSize(true);
+        list.setItemViewCacheSize(12);
+        list.setAdapter(new MediaAdapter(sorted));
+        root.addView(list,new LinearLayout.LayoutParams(-1,0,1));
+        setContentView(root);
     }
 
     private void preview(StorageItem item) {
@@ -341,6 +351,67 @@ public class MainActivity extends AppCompatActivity {
     private long daysAgo(long time){return Math.max(0,(System.currentTimeMillis()-time)/86400000L);}
 
     @Override protected void onDestroy(){worker.shutdownNow();super.onDestroy();}
+
+    private class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.Holder> {
+        private final List<StorageItem> items;
+        MediaAdapter(List<StorageItem> values){items=values;}
+        @Override public Holder onCreateViewHolder(ViewGroup parent,int viewType){
+            LinearLayout card=row();
+            card.setPadding(dp(10),dp(9),dp(10),dp(9));
+            card.setBackground(round(CARD,14));
+            RecyclerView.LayoutParams params=new RecyclerView.LayoutParams(-1,dp(86));
+            params.setMargins(0,0,0,dp(9));
+            card.setLayoutParams(params);
+            ImageView image=new ImageView(MainActivity.this);
+            image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            image.setBackgroundColor(0xff55463e);
+            card.addView(image,new LinearLayout.LayoutParams(dp(68),dp(68)));
+            LinearLayout copy=new LinearLayout(MainActivity.this);
+            copy.setOrientation(LinearLayout.VERTICAL);
+            copy.setGravity(Gravity.CENTER_VERTICAL);
+            copy.setPadding(dp(12),0,dp(6),0);
+            TextView name=text("",15,TEXT,true);
+            name.setMaxLines(1);
+            name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            TextView meta=text("",12,MUTED,false);
+            meta.setMaxLines(2);
+            copy.addView(name);
+            copy.addView(meta);
+            card.addView(copy,new LinearLayout.LayoutParams(0,-1,1));
+            Button open=smallButton("View");
+            card.addView(open,new LinearLayout.LayoutParams(dp(68),dp(46)));
+            return new Holder(card,image,name,meta,open);
+        }
+        @Override public void onBindViewHolder(Holder h,int position){
+            StorageItem item=items.get(position);
+            h.name.setText(item.name);
+            h.meta.setText(format(item.size)+" · "+item.path);
+            h.open.setOnClickListener(v->preview(item));
+            h.itemView.setOnClickListener(v->preview(item));
+            if(item.media){
+                Glide.with(MainActivity.this)
+                    .load(item.uri)
+                    .override(180,180)
+                    .centerCrop()
+                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                    .placeholder(android.R.drawable.ic_menu_gallery)
+                    .error(android.R.drawable.ic_menu_report_image)
+                    .into(h.image);
+            }else{
+                Glide.with(MainActivity.this).clear(h.image);
+                h.image.setImageResource(item.mime.contains("package")?android.R.drawable.sym_def_app_icon:android.R.drawable.ic_menu_save);
+            }
+        }
+        @Override public void onViewRecycled(Holder h){
+            Glide.with(MainActivity.this).clear(h.image);
+            super.onViewRecycled(h);
+        }
+        @Override public int getItemCount(){return items.size();}
+        class Holder extends RecyclerView.ViewHolder{
+            final ImageView image;final TextView name,meta;final Button open;
+            Holder(View root,ImageView i,TextView n,TextView m,Button o){super(root);image=i;name=n;meta=m;open=o;}
+        }
+    }
 
     static class StorageItem {
         final Uri uri;final String name;final long size;final String mime,path;final long modified;final boolean media;
