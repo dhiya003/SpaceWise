@@ -37,6 +37,8 @@ jobs:
           mkdir -p build/safety-tests
           javac -d build/safety-tests app/src/main/java/com/verve/spacesweep/DuplicateEngine.java tests/DuplicateEngineTest.java
           java -cp build/safety-tests com.verve.spacesweep.DuplicateEngineTest
+          javac -d build/safety-tests app/src/main/java/com/verve/spacesweep/FolderExclusions.java tests/FolderExclusionsTest.java
+          java -cp build/safety-tests com.verve.spacesweep.FolderExclusionsTest
       - name: Build installable debug APK
         working-directory: SpaceSweep
         run: gradle :app:assembleDebug --no-daemon --stacktrace

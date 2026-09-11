@@ -43,9 +43,11 @@ public class MainActivity extends Activity {
     private int page=0, scanFailures=0;
     private final Map<Group,Integer> groupPages=new IdentityHashMap<>();
     private long scannedBytes=0;
+    private Set<String> excludedFolders=Collections.emptySet();
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        excludedFolders=new HashSet<>(getPreferences(MODE_PRIVATE).getStringSet("excluded_folders",Collections.emptySet()));
         if(getPreferences(MODE_PRIVATE).getBoolean("cleanup_active",false)) {
             message="Previous cleanup was interrupted. No remaining deletions will be resumed. Scan to refresh files.";
             getPreferences(MODE_PRIVATE).edit().putBoolean("cleanup_active",false).apply();
@@ -172,6 +174,7 @@ public class MainActivity extends Activity {
             body.addView(text("Photo/video exact matching is paused without original-media access. Large-file review still works. Grant access to compare unredacted originals safely.",13,MUTED));
         body.addView(button("Manage media permissions",this::permissions));
         body.addView(button("Add document folder",this::pickFolder));
+        body.addView(button("Excluded folders ("+excludedFolders.size()+")",this::manageExclusions));
         body.addView(button("App storage & cache → Android settings",()->openSettings(Settings.ACTION_INTERNAL_STORAGE_SETTINGS)));
         body.addView(text("Android controls private app storage. Clear cache or uninstall apps there; SpaceSweep never promises to clear every app's cache.",12,MUTED));
     }
@@ -273,8 +276,10 @@ public class MainActivity extends Activity {
         for(String path:paths.subList(Math.min(page*30,paths.size()),Math.min(page*30+30,paths.size()))) {
             LinearLayout c=card();c.addView(title(bytes(sums.get(path)),22));c.addView(text(path,14,MUTED));
             c.addView(button("Review files",()->{navigate("Large");folderFilter=path;filter="All";render();}));
+            c.addView(button("Exclude this folder",()->confirmExclude(FolderExclusions.displayPath(path))));
         }
         pagination(paths.size(),30);
+        body.addView(button("Manage excluded folders ("+excludedFolders.size()+")",this::manageExclusions));
         body.addView(button("Choose a document folder",this::pickFolder));
         body.addView(button("Downloads / restricted folders → Files",()->{
             try{startActivity(new Intent("android.intent.action.VIEW_DOWNLOADS"));returnedFromSettings=true;}catch(Exception e){openSettings(Settings.ACTION_INTERNAL_STORAGE_SETTINGS);}
@@ -321,6 +326,37 @@ public class MainActivity extends Activity {
             }catch(Exception e){runOnUiThread(()->{if(dead)return;busy=false;needsRefresh=true;message=cancelled?"Scan stopped. Scan again before deleting.":"Scan incomplete. Check permissions and retry.";render();});}
         });
     }
+    private void manageExclusions() {
+        if(busy||deleting){toast("Finish or stop the scan first.");return;}
+        List<String> rules=new ArrayList<>(excludedFolders);Collections.sort(rules);
+        String[] labels=rules.stream().map(p->"Include again: "+p).toArray(String[]::new);
+        AlertDialog.Builder dialog=new AlertDialog.Builder(this).setTitle("Excluded folders");
+        if(rules.isEmpty())dialog.setMessage("No exclusions yet. Excluding a folder also excludes its subfolders from scans and cleanup. Rules apply to matching paths on internal storage and SD cards.");
+        else dialog.setItems(labels,(d,which)->{Set<String> next=new HashSet<>(excludedFolders);next.remove(rules.get(which));saveExclusions(next);});
+        dialog.setPositiveButton("Choose folder",(d,w)->{
+            Intent pick=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).putExtra(Intent.EXTRA_LOCAL_ONLY,true);
+            startActivityForResult(pick,21);
+        }).setNegativeButton("Close",null).show();
+    }
+    private void confirmExclude(String path) {
+        if(busy||deleting){toast("Finish or stop the scan first.");return;}
+        String rule=FolderExclusions.normalize(path);
+        if(rule.isEmpty()){toast("Choose a specific folder, not the storage root.");return;}
+        new AlertDialog.Builder(this).setTitle("Exclude "+rule+"?")
+            .setMessage("This folder and all its subfolders will be left out of scans, duplicates and cleanup. Matching paths on internal storage and SD cards are excluded. Files will not be deleted.")
+            .setNegativeButton("Cancel",null).setPositiveButton("Exclude",(d,w)->{
+                Set<String> next=new HashSet<>(excludedFolders);next.add(rule);saveExclusions(next);
+            }).show();
+    }
+    private void saveExclusions(Set<String> next) {
+        if(busy||deleting)return;
+        if(!getPreferences(MODE_PRIVATE).edit().putStringSet("excluded_folders",new HashSet<>(next)).commit()){
+            toast("Could not save exclusions. Please try again.");return;
+        }
+        excludedFolders=Collections.unmodifiableSet(new HashSet<>(next));
+        files.clear();groups.clear();selected.clear();groupPages.clear();page=0;scannedBytes=0;needsRefresh=true;
+        message="Folder exclusions saved.";if(hasAnyAccess())scan();else render();
+    }
     private long lastProgress=0;
     private void postStatus(String s) {
         long now=SystemClock.elapsedRealtime();if(now-lastProgress<150)return;lastProgress=now;
@@ -336,6 +372,7 @@ public class MainActivity extends Activity {
             while(c.moveToNext()) {
                 DuplicateEngine.check(()->cancelled||dead);
                 Uri uri=ContentUris.withAppendedId(collection,c.getLong(0)); long size=c.getLong(2);if(size<=0)continue;
+                if(FolderExclusions.matches(c.getString(4),excludedFolders))continue;
                 boolean originalAccess=!visual||granted(Manifest.permission.ACCESS_MEDIA_LOCATION);
                 Source source=()->{
                     try{return getContentResolver().openInputStream(visual?MediaStore.setRequireOriginal(uri):uri);}
@@ -354,6 +391,7 @@ public class MainActivity extends Activity {
             while(!queue.isEmpty()) {
                 DuplicateEngine.check(()->cancelled||dead);
                 String[] next=queue.remove();String identity=tree.getAuthority()+":"+next[0];if(!visited.add(identity))continue;
+                if(FolderExclusions.matches(FolderExclusions.documentPath(next[0]),excludedFolders))continue;
                 if(visited.size()>100000)throw new IOException("Too many folders. Choose smaller folders.");
                 Uri children=DocumentsContract.buildChildDocumentsUriUsingTree(tree,next[0]);
                 try(Cursor c=getContentResolver().query(children,new String[]{"document_id","_display_name","mime_type","_size","last_modified","flags"},null,null,null,scanCancellation)) {
@@ -403,6 +441,7 @@ public class MainActivity extends Activity {
         });
     }
     private void validateCurrentFile(Item item)throws IOException {
+        if(FolderExclusions.matches(FolderExclusions.displayPath(item.path),excludedFolders))throw new IOException("File is in an excluded folder");
         String[] columns=item.media?new String[]{"_size","date_modified","is_favorite","is_pending","is_trashed"}:
             new String[]{"_size","last_modified","flags"};
         try(Cursor c=getContentResolver().query(Uri.parse(item.id),columns,null,null,null)) {
@@ -425,6 +464,10 @@ public class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int request,int result,Intent data) {
         super.onActivityResult(request,result,data);
+        if(request==21&&result==RESULT_OK&&data!=null&&data.getData()!=null){
+            if(!isLocalTree(data.getData())){toast("Choose a local phone or SD-card folder.");return;}
+            confirmExclude(FolderExclusions.documentPath(DocumentsContract.getTreeDocumentId(data.getData())));return;
+        }
         if(request==20&&result==RESULT_OK&&data!=null&&data.getData()!=null) {
             if(!isLocalTree(data.getData())){toast("Choose a folder under internal storage or SD card. Cloud and other document providers are not supported.");return;}
             try {getContentResolver().takePersistableUriPermission(data.getData(),data.getFlags()&(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION));scan();}
