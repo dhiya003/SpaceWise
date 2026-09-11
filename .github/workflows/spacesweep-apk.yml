@@ -1,0 +1,57 @@
+name: SpaceSweep test APK
+
+on:
+  pull_request:
+    paths:
+      - 'SpaceSweep/**'
+      - '.github/workflows/spacesweep-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spacesweep-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Set up Android SDK (licence acceptance authorized)
+        uses: android-actions/setup-android@v3
+      - name: Install Android build dependencies
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Run duplicate safety regression tests
+        working-directory: SpaceSweep
+        run: |
+          mkdir -p build/safety-tests
+          javac -d build/safety-tests app/src/main/java/com/verve/spacesweep/DuplicateEngine.java tests/DuplicateEngineTest.java
+          java -cp build/safety-tests com.verve.spacesweep.DuplicateEngineTest
+          javac -d build/safety-tests app/src/main/java/com/verve/spacesweep/FolderExclusions.java tests/FolderExclusionsTest.java
+          java -cp build/safety-tests com.verve.spacesweep.FolderExclusionsTest
+      - name: Build installable debug APK
+        working-directory: SpaceSweep
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - name: Verify APK signing and package
+        run: |
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose SpaceSweep/app/build/outputs/apk/debug/app-debug.apk
+          mkdir -p artifacts
+          cp SpaceSweep/app/build/outputs/apk/debug/app-debug.apk artifacts/SpaceSweep-test.apk
+          sha256sum artifacts/SpaceSweep-test.apk > artifacts/SHA256SUMS.txt
+      - name: Upload APK for phone testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpaceSweep-test-apk
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
