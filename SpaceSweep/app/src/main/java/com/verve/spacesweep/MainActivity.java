@@ -442,10 +442,11 @@ public class MainActivity extends Activity {
     }
     private void validateCurrentFile(Item item)throws IOException {
         if(FolderExclusions.matches(FolderExclusions.displayPath(item.path),excludedFolders))throw new IOException("File is in an excluded folder");
-        String[] columns=item.media?new String[]{"_size","date_modified","is_favorite","is_pending","is_trashed"}:
+        String[] columns=item.media?new String[]{"_size","date_modified","is_favorite","is_pending","is_trashed","relative_path"}:
             new String[]{"_size","last_modified","flags"};
         try(Cursor c=getContentResolver().query(Uri.parse(item.id),columns,null,null,null)) {
             if(c==null||!c.moveToFirst())throw new IOException("File is no longer accessible: "+item.name);
+            if(item.media&&FolderExclusions.matches(c.getString(5),excludedFolders))throw new IOException("File moved into an excluded folder. Rescan first.");
             long size=c.isNull(0)?-1:c.getLong(0),modified=c.getLong(1)*(item.media?1000:1);
             boolean favorite=item.media&&c.getInt(2)==1;
             boolean deletable=item.media?(c.getInt(3)==0&&c.getInt(4)==0):((c.getInt(2)&DocumentsContract.Document.FLAG_SUPPORTS_DELETE)!=0);
